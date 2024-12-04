@@ -557,7 +557,7 @@ export {
 export { EvmCoreModule } from './core/EvmCoreModule.js';
 export {
   isProxy,
-  proxyAdmin,
+  // proxyAdmin,
   proxyConstructorArgs,
   proxyImplementation,
 } from './deploy/proxy.js';
