@@ -56,7 +56,7 @@ hyperlane-ton = {path = "../chains/hyperlane-ton"}
 hyperlane-test = { path = "../hyperlane-test" }
 
 reqwest.workspace = true
-tonlib-core = "0.22.2"
+tonlib-core.workspace = true
 
 # dependency version is determined by etheres
 rusoto_core = "*"
