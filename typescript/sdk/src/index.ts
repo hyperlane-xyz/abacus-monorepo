@@ -601,11 +601,8 @@ export {
 export { getCosmosRegistryChain } from './utils/cosmos.js';
 export { filterByChains } from './utils/filter.js';
 export {
-  ANVIL_RPC_METHODS,
-  getLocalProvider,
   impersonateAccount,
   resetFork,
-  setFork,
   stopImpersonatingAccount,
 } from './utils/fork.js';
 export {
