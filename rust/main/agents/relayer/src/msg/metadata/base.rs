@@ -197,7 +197,7 @@ impl MetadataBuilder for MessageMetadataBuilder {
     ) -> Result<Option<Vec<u8>>> {
         self.build_ism_and_metadata(ism_address, message)
             .await
-            .map(|ism_with_metadata| ism_with_metadata.metadata)
+            .map(|ism_with_metadata: IsmWithMetadataAndType| ism_with_metadata.metadata)
     }
 }
 
@@ -234,7 +234,6 @@ impl MessageMetadataBuilder {
         ism_address: H256,
         message: &HyperlaneMessage,
     ) -> Result<IsmWithMetadataAndType> {
-        info!("build_ism_and_metadata");
         let ism: Box<dyn InterchainSecurityModule> = self
             .build_ism(ism_address)
             .await
@@ -335,7 +334,6 @@ impl BaseMetadataBuilder {
         let _merkle_leaf = self
             .db
             .retrieve_merkle_leaf_index_by_message_id(&message_id)?;
-
         Ok(_merkle_leaf)
     }
 
