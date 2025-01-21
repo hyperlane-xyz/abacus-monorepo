@@ -37,6 +37,7 @@ import {
   RemoteRouters,
   RoutingIsmConfig,
   SubmissionStrategy,
+  SubmissionStrategySchema,
   TOKEN_TYPE_TO_STANDARD,
   TokenFactories,
   TrustedRelayerIsmConfig,
@@ -69,6 +70,7 @@ import { MINIMUM_WARP_DEPLOY_GAS } from '../consts.js';
 import { requestAndSaveApiKeys } from '../context/context.js';
 import { WriteCommandContext } from '../context/types.js';
 import { log, logBlue, logGray, logGreen, logTable } from '../logger.js';
+import { WarpSendLogs } from '../send/transfer.js';
 import { getSubmitterBuilder } from '../submit/submit.js';
 import {
   indentYamlOrJson,
@@ -77,6 +79,7 @@ import {
   runFileSelectionStep,
   writeYamlOrJson,
 } from '../utils/files.js';
+import { canSelfRelay, runSelfRelay } from '../utils/relay.js';
 
 import {
   completeDeploy,
@@ -93,6 +96,7 @@ interface WarpApplyParams extends DeployParams {
   warpCoreConfig: WarpCoreConfig;
   strategyUrl?: string;
   receiptsDir: string;
+  selfRelay?: boolean;
 }
 
 export async function runWarpRouteDeploy({
@@ -1021,13 +1025,14 @@ async function submitWarpApplyTransactions(
       await retryAsync(
         async () => {
           const chain = chainIdToName[chainId];
-          const submitter: TxSubmitterBuilder<ProtocolType> =
-            await getWarpApplySubmitter({
+          const { submitter, config } =
+            await getWarpApplySubmitter<ProtocolType.Ethereum>({
               chain,
               context: params.context,
               strategyUrl: params.strategyUrl,
             });
           const transactionReceipts = await submitter.submit(...transactions);
+
           if (transactionReceipts) {
             const receiptPath = `${params.receiptsDir}/${chain}-${
               submitter.txSubmitterType
@@ -1036,6 +1041,20 @@ async function submitWarpApplyTransactions(
             logGreen(
               `Transactions receipts successfully written to ${receiptPath}`,
             );
+          }
+
+          const canRelay = canSelfRelay(
+            params.selfRelay ?? false,
+            config,
+            transactionReceipts,
+          );
+          if (canRelay.relay) {
+            await runSelfRelay({
+              txReceipt: canRelay.txReceipt,
+              multiProvider: params.context.multiProvider,
+              registry: params.context.registry,
+              successMessage: WarpSendLogs.SUCCESS,
+            });
           }
         },
         5, // attempts
@@ -1050,7 +1069,7 @@ async function submitWarpApplyTransactions(
  *
  * @returns the warp apply submitter
  */
-async function getWarpApplySubmitter({
+async function getWarpApplySubmitter<T extends ProtocolType>({
   chain,
   context,
   strategyUrl,
@@ -1058,8 +1077,11 @@ async function getWarpApplySubmitter({
   chain: ChainName;
   context: WriteCommandContext;
   strategyUrl?: string;
-}): Promise<TxSubmitterBuilder<ProtocolType>> {
-  const { multiProvider } = context;
+}): Promise<{
+  submitter: TxSubmitterBuilder<T>;
+  config: SubmissionStrategy;
+}> {
+  const { multiProvider, registry } = context;
 
   const submissionStrategy: SubmissionStrategy = strategyUrl
     ? readChainSubmissionStrategy(strategyUrl)[chain]
@@ -1070,8 +1092,12 @@ async function getWarpApplySubmitter({
         },
       };
 
-  return getSubmitterBuilder<ProtocolType>({
-    submissionStrategy,
-    multiProvider,
-  });
+  return {
+    submitter: await getSubmitterBuilder<T>({
+      submissionStrategy: SubmissionStrategySchema.parse(submissionStrategy),
+      multiProvider,
+      registry,
+    }),
+    config: submissionStrategy,
+  };
 }
