@@ -437,6 +437,14 @@ export {
   IcaRouterConfigSchema,
   RemoteIcaRouterConfigSchema,
 } from './ica/types.js';
+export { IntentCore, IntentCoreOptions } from './intent/IntentCore.js';
+export {
+  IntentCoreConfig,
+  IntentCoreConfigSchema,
+  IntentCoreFeeEstimate,
+  IntentTxCategory,
+  IntentTypedTransaction,
+} from './intent/types.js';
 export { EvmIsmModule } from './ism/EvmIsmModule.js';
 export {
   chainMetadataToCosmosChain,
@@ -612,13 +620,6 @@ export {
   setFork,
   stopImpersonatingAccount,
 } from './utils/fork.js';
-export {
-  canProposeSafeTransactions,
-  getSafe,
-  getSafeDelegates,
-  getSafeService,
-  // @ts-ignore
-} from './utils/gnosisSafe.js';
 export { HyperlaneReader } from './utils/HyperlaneReader.js';
 export { multisigIsmVerificationCost, normalizeConfig } from './utils/ism.js';
 export { MultiGeneric } from './utils/MultiGeneric.js';
