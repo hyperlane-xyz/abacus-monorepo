@@ -10,6 +10,7 @@ use hyperlane_core::{
     ChainResult, ContractLocator, HyperlaneAbi, HyperlaneChain, HyperlaneContract, HyperlaneDomain,
     HyperlaneMessage, HyperlaneProvider, InterchainSecurityModule, ModuleType, H256, U256,
 };
+
 use starknet::accounts::SingleOwnerAccount;
 use starknet::core::types::FieldElement;
 use starknet::providers::AnyProvider;
@@ -23,7 +24,8 @@ use crate::contracts::interchain_security_module::{
 use crate::error::HyperlaneStarknetError;
 use crate::types::HyH256;
 use crate::{
-    build_single_owner_account, to_hpl_module_type, ConnectionConf, Signer, StarknetProvider,
+    build_single_owner_account, to_hpl_module_type, to_packed_bytes, ConnectionConf, Signer,
+    StarknetProvider,
 };
 
 impl<A> std::fmt::Display for StarknetInterchainSecurityModuleInternal<A>
@@ -43,6 +45,7 @@ pub struct StarknetInterchainSecurityModule {
         Arc<StarknetInterchainSecurityModuleInternal<SingleOwnerAccount<AnyProvider, LocalWallet>>>,
     provider: StarknetProvider,
     conn: ConnectionConf,
+    signer: Signer,
 }
 
 impl StarknetInterchainSecurityModule {
@@ -71,6 +74,7 @@ impl StarknetInterchainSecurityModule {
             contract: Arc::new(contract),
             provider: StarknetProvider::new(locator.domain.clone(), conn),
             conn: conn.clone(),
+            signer: signer.clone(),
         })
     }
 
@@ -135,21 +139,24 @@ impl InterchainSecurityModule for StarknetInterchainSecurityModule {
         message: &HyperlaneMessage,
         metadata: &[u8],
     ) -> ChainResult<Option<U256>> {
-        let message = &message.into();
+        let message_starknet = &message.into();
 
         let tx = self.contract.verify(
             &StarknetBytes {
                 size: metadata.len() as u32,
-                data: metadata.iter().map(|b| *b as u128).collect(),
+                data: to_packed_bytes(metadata),
             },
-            message,
+            message_starknet,
         );
 
+        println!("JAMARR metadata {:?}", metadata);
+        println!("JAMARR message {:?}", message);
+        println!("JAMARR tx {:?}", tx);
+
         println!(
-            "StarknetISM dry_run_verify address {:?} with metadata {:?} with size {:?}",
+            "StarknetISM dry_run_verify address {:?} with self.address {:?}",
             self.contract.address,
-            metadata.iter().map(|b| *b as u128).collect::<Vec<_>>(),
-            metadata.len()
+            self.address()
         );
 
         let response = tx

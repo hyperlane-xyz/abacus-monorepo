@@ -110,6 +110,11 @@ impl<T: MultisigIsmMetadataBuilder> MetadataBuilder for T {
             .await
             .context(CTX)?;
 
+        println!(
+            "SAQUON validators and threshold {:?}, {:?}",
+            validators, threshold
+        );
+
         if validators.is_empty() {
             info!("Could not fetch metadata: No validator set found for ISM");
             return Ok(None);
@@ -126,8 +131,16 @@ impl<T: MultisigIsmMetadataBuilder> MetadataBuilder for T {
             .await
             .context(CTX)?
         {
-            debug!(hyp_message=?message, ?metadata.checkpoint, "Found checkpoint with quorum");
-            Ok(Some(self.format_metadata(metadata)?))
+            let formatted_metadata = self.format_metadata(metadata)?;
+            println!("BURROW message {:?}", message);
+
+            println!(
+                "SAQUON formatted_metadata: {:?} and length {:?}",
+                formatted_metadata,
+                formatted_metadata.len()
+            );
+            // debug!(hyp_message=?message, ?metadata.checkpoint, "Found checkpoint with quorum");
+            Ok(Some(formatted_metadata))
         } else {
             info!(
                 hyp_message=?message, ?validators, threshold, ism=%multisig_ism.address(),

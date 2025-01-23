@@ -137,16 +137,18 @@ pub(crate) fn deploy_all(
     println!("Deploying pausable ism");
     let ism_pausable = cli.deploy(declarations.hpl_ism_pausable, vec![deployer.clone()]);
 
+    println!("MAHOMES Multisig used for aggregation {:?}", ism_multisig);
+
     // deploy ism - aggregation
     println!("Deploying aggregation ism");
     let ism_aggregate = cli.deploy(
         declarations.hpl_ism_aggregate,
         vec![
             deployer.clone(),
-            "2".to_string(),
+            "1".to_string(),
             ism_multisig.clone(),
-            ism_pausable,
-            "2".to_string(),
+            // ism_pausable,
+            "1".to_string(),
         ],
     );
 
@@ -205,7 +207,7 @@ pub(crate) fn deploy_all(
     println!("Deploying mock receiver");
     let mock_receiver = cli.deploy(
         declarations.hpl_test_mock_msg_receiver,
-        vec![default_ism.clone()],
+        vec![ism_aggregate.clone()],
     );
 
     let mock_ism = cli.deploy(declarations.hpl_test_mock_ism, vec![]);
