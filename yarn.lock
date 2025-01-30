@@ -7373,7 +7373,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@hyperlane-xyz/core@npm:5.11.0, @hyperlane-xyz/core@npm:^5.4.1, @hyperlane-xyz/core@workspace:solidity":
+"@hyperlane-xyz/core@npm:5.11.1, @hyperlane-xyz/core@npm:^5.4.1, @hyperlane-xyz/core@workspace:solidity":
   version: 0.0.0-use.local
   resolution: "@hyperlane-xyz/core@workspace:solidity"
   dependencies:
