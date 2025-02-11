@@ -50,6 +50,7 @@ use crate::{
 
 mod config;
 mod cosmos;
+mod cosmosnative;
 mod ethereum;
 mod invariants;
 mod logging;
