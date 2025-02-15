@@ -532,6 +532,7 @@ mod test {
             destination: destination.id(),
             recipient: Default::default(),
             body: Default::default(),
+            id: std::sync::OnceLock::new(),
         }
     }
 
