@@ -1,8 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
-
 use axum::async_trait;
 use ethers::prelude::Selector;
 use eyre::{eyre, Context, Report, Result};
+use fuels::accounts::wallet::WalletUnlocked;
+use std::{collections::HashMap, sync::Arc};
 
 use ethers_prometheus::middleware::{ChainInfo, ContractInfo, PrometheusMiddlewareConf};
 
@@ -158,7 +158,7 @@ impl ChainConnectionConf {
             Self::Ethereum(conf) => Some(&conf.operation_batch),
             Self::Cosmos(conf) => Some(&conf.operation_batch),
             Self::Sealevel(conf) => Some(&conf.operation_batch),
-            _ => None,
+            Self::Fuel(conf) => Some(&conf.operation_batch),
         }
     }
 }
@@ -205,7 +205,10 @@ impl ChainConf {
                 h_eth::application::EthereumApplicationOperationVerifier::new(),
             )
                 as Box<dyn ApplicationOperationVerifier>),
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(_conf) => Ok(Box::new(
+                h_fuel::application::FuelApplicationOperationVerifier::new(),
+            )
+                as Box<dyn ApplicationOperationVerifier>),
             ChainConnectionConf::Sealevel(conf) => {
                 let provider = h_sealevel::SealevelProvider::new(locator.domain.clone(), conf);
                 let verifier =
@@ -233,7 +236,9 @@ impl ChainConf {
                 self.build_ethereum(conf, &locator, metrics, h_eth::HyperlaneProviderBuilder {})
                     .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => Ok(Box::new(
+                h_fuel::FuelProvider::new(locator.domain.clone(), conf).await,
+            ) as Box<dyn HyperlaneProvider>),
             ChainConnectionConf::Sealevel(conf) => Ok(Box::new(h_sealevel::SealevelProvider::new(
                 locator.domain.clone(),
                 conf,
@@ -301,8 +306,12 @@ impl ChainConf {
                 self.build_ethereum(conf, &locator, metrics, h_eth::MerkleTreeHookBuilder {})
                     .await
             }
-            ChainConnectionConf::Fuel(_conf) => {
-                todo!("Fuel does not support merkle tree hooks yet")
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                h_fuel::FuelMerkleTreeHook::new(conf, locator, wallet)
+                    .await
+                    .map(|m| Box::new(m) as Box<dyn MerkleTreeHook>)
+                    .map_err(Into::into)
             }
             ChainConnectionConf::Sealevel(conf) => {
                 h_sealevel::SealevelMailbox::new(conf, locator, None)
@@ -341,7 +350,12 @@ impl ChainConf {
                 )
                 .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                let indexer =
+                    Box::new(h_fuel::FuelDispatchIndexer::new(conf, locator, wallet).await?);
+                Ok(indexer as Box<dyn SequenceAwareIndexer<HyperlaneMessage>>)
+            }
             ChainConnectionConf::Sealevel(conf) => {
                 let indexer = Box::new(h_sealevel::SealevelMailboxIndexer::new(
                     conf,
@@ -386,7 +400,12 @@ impl ChainConf {
                 )
                 .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                let indexer =
+                    Box::new(h_fuel::FuelDeliveryIndexer::new(conf, locator, wallet).await?);
+                Ok(indexer as Box<dyn SequenceAwareIndexer<H256>>)
+            }
             ChainConnectionConf::Sealevel(conf) => {
                 let indexer = Box::new(h_sealevel::SealevelMailboxIndexer::new(
                     conf,
@@ -429,7 +448,13 @@ impl ChainConf {
                 )
                 .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                Ok(
+                    Box::new(h_fuel::FuelInterchainGasPaymaster::new(conf, locator, wallet).await?)
+                        as Box<dyn InterchainGasPaymaster>,
+                )
+            }
             ChainConnectionConf::Sealevel(conf) => {
                 let paymaster = Box::new(
                     h_sealevel::SealevelInterchainGasPaymaster::new(conf, &locator).await?,
@@ -473,7 +498,13 @@ impl ChainConf {
                 )
                 .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                let indexer = Box::new(
+                    h_fuel::FuelInterchainGasPaymasterIndexer::new(conf, locator, wallet).await?,
+                );
+                Ok(indexer as Box<dyn SequenceAwareIndexer<InterchainGasPayment>>)
+            }
             ChainConnectionConf::Sealevel(conf) => {
                 let indexer = Box::new(
                     h_sealevel::SealevelInterchainGasPaymasterIndexer::new(
@@ -519,7 +550,12 @@ impl ChainConf {
                 )
                 .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let signer = self.fuel_signer().await.context(ctx)?;
+                let indexer =
+                    Box::new(h_fuel::FuelMerkleTreeHookIndexer::new(conf, locator, signer).await?);
+                Ok(indexer as Box<dyn SequenceAwareIndexer<MerkleTreeInsertion>>)
+            }
             ChainConnectionConf::Sealevel(conf) => {
                 let mailbox_indexer = Box::new(h_sealevel::SealevelMailboxIndexer::new(
                     conf,
@@ -559,7 +595,13 @@ impl ChainConf {
                 self.build_ethereum(conf, &locator, metrics, h_eth::ValidatorAnnounceBuilder {})
                     .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                Ok(
+                    Box::new(h_fuel::FuelValidatorAnnounce::new(conf, locator, wallet).await?)
+                        as Box<dyn ValidatorAnnounce>,
+                )
+            }
             ChainConnectionConf::Sealevel(conf) => {
                 let va = Box::new(h_sealevel::SealevelValidatorAnnounce::new(conf, locator));
                 Ok(va as Box<dyn ValidatorAnnounce>)
@@ -598,7 +640,14 @@ impl ChainConf {
                 )
                 .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                Ok(
+                    Box::new(
+                        h_fuel::FuelInterchainSecurityModule::new(conf, locator, wallet).await?,
+                    ) as Box<dyn InterchainSecurityModule>,
+                )
+            }
             ChainConnectionConf::Sealevel(conf) => {
                 let keypair = self.sealevel_signer().await.context(ctx)?;
                 let ism = Box::new(h_sealevel::SealevelInterchainSecurityModule::new(
@@ -633,8 +682,13 @@ impl ChainConf {
                 self.build_ethereum(conf, &locator, metrics, h_eth::MultisigIsmBuilder {})
                     .await
             }
-
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                Ok(
+                    Box::new(h_fuel::FuelMultisigIsm::new(conf, locator, wallet).await?)
+                        as Box<dyn MultisigIsm>,
+                )
+            }
             ChainConnectionConf::Sealevel(conf) => {
                 let keypair = self.sealevel_signer().await.context(ctx)?;
                 let ism = Box::new(h_sealevel::SealevelMultisigIsm::new(
@@ -674,7 +728,13 @@ impl ChainConf {
                 self.build_ethereum(conf, &locator, metrics, h_eth::RoutingIsmBuilder {})
                     .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                Ok(
+                    Box::new(h_fuel::FuelRoutingIsm::new(conf, locator, wallet).await?)
+                        as Box<dyn RoutingIsm>,
+                )
+            }
             ChainConnectionConf::Sealevel(_) => {
                 Err(eyre!("Sealevel does not support routing ISM yet")).context(ctx)
             }
@@ -708,7 +768,13 @@ impl ChainConf {
                 self.build_ethereum(conf, &locator, metrics, h_eth::AggregationIsmBuilder {})
                     .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(conf) => {
+                let wallet = self.fuel_signer().await.context(ctx)?;
+                Ok(
+                    Box::new(h_fuel::FuelAggregationIsm::new(conf, locator, wallet).await?)
+                        as Box<dyn AggregationIsm>,
+                )
+            }
             ChainConnectionConf::Sealevel(_) => {
                 Err(eyre!("Sealevel does not support aggregation ISM yet")).context(ctx)
             }
@@ -743,7 +809,9 @@ impl ChainConf {
                 self.build_ethereum(conf, &locator, metrics, h_eth::CcipReadIsmBuilder {})
                     .await
             }
-            ChainConnectionConf::Fuel(_) => todo!(),
+            ChainConnectionConf::Fuel(_) => {
+                Err(eyre!("Fuel does not support CCIP read ISM yet")).context(ctx)
+            }
             ChainConnectionConf::Sealevel(_) => {
                 Err(eyre!("Sealevel does not support CCIP read ISM yet")).context(ctx)
             }
@@ -786,9 +854,24 @@ impl ChainConf {
     }
 
     async fn fuel_signer(&self) -> Result<fuels::prelude::WalletUnlocked> {
-        self.signer().await.and_then(|opt| {
-            opt.ok_or_else(|| eyre!("Fuel requires a signer to construct contract instances"))
-        })
+        let mut wallet: WalletUnlocked = self
+            .signer()
+            .await?
+            .ok_or_else(|| eyre!("Fuel requires a signer to construct contract instances"))?;
+
+        let connection_conf = match &self.connection {
+            ChainConnectionConf::Fuel(conf) => conf,
+            _ => {
+                return Err(eyre!(
+                    "The connection configuration for the chain is not a Fuel connection"
+                ))
+            }
+        };
+
+        let provider = h_fuel::make_provider(connection_conf).await?;
+        wallet.set_provider(provider);
+
+        Ok(wallet)
     }
 
     async fn sealevel_signer(&self) -> Result<Option<h_sealevel::Keypair>> {
