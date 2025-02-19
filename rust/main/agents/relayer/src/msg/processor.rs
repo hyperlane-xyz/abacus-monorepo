@@ -391,7 +391,7 @@ impl MessageProcessorMetrics {
 mod test {
     use std::time::Instant;
 
-    use prometheus::{IntCounter, Registry};
+    use prometheus::{IntCounter, IntCounterVec, Registry};
     use tokio::{
         sync::{
             mpsc::{self, UnboundedReceiver},
@@ -402,6 +402,7 @@ mod test {
     use tokio_metrics::TaskMonitor;
 
     use hyperlane_base::{
+        cache::{LocalCache, MeteredCache, MeteredCacheConfig, MeteredCacheMetrics},
         db::{
             test_utils, DbResult, HyperlaneRocksDB, InterchainGasExpenditureData,
             InterchainGasPaymentData,
@@ -455,6 +456,21 @@ mod test {
         }
     }
 
+    fn dummy_cache_metrics() -> MeteredCacheMetrics {
+        MeteredCacheMetrics {
+            hit_count: IntCounterVec::new(
+                prometheus::Opts::new("dummy_hit_count", "help string"),
+                &["cache_name", "method", "status"],
+            )
+            .ok(),
+            miss_count: IntCounterVec::new(
+                prometheus::Opts::new("dummy_miss_count", "help string"),
+                &["cache_name", "method", "status"],
+            )
+            .ok(),
+        }
+    }
+
     fn dummy_submission_metrics() -> MessageSubmissionMetrics {
         MessageSubmissionMetrics {
             last_known_nonce: IntGauge::new("last_known_nonce_gauge", "help string").unwrap(),
@@ -484,6 +500,7 @@ mod test {
         origin_domain: &HyperlaneDomain,
         destination_domain: &HyperlaneDomain,
         db: &HyperlaneRocksDB,
+        cache: MeteredCache<LocalCache>,
     ) -> BaseMetadataBuilder {
         let mut settings = Settings::default();
         settings.chains.insert(
@@ -504,6 +521,7 @@ mod test {
             false,
             Arc::new(core_metrics),
             db.clone(),
+            cache,
             IsmAwareAppContextClassifier::new(Arc::new(MockMailboxContract::default()), vec![]),
         )
     }
@@ -512,11 +530,14 @@ mod test {
         origin_domain: &HyperlaneDomain,
         destination_domain: &HyperlaneDomain,
         db: &HyperlaneRocksDB,
+        cache: MeteredCache<LocalCache>,
     ) -> (MessageProcessor, UnboundedReceiver<QueueOperation>) {
-        let base_metadata_builder = dummy_metadata_builder(origin_domain, destination_domain, db);
+        let base_metadata_builder =
+            dummy_metadata_builder(origin_domain, destination_domain, db, cache.clone());
         let message_context = Arc::new(MessageContext {
             destination_mailbox: Arc::new(MockMailboxContract::default()),
             origin_db: Arc::new(db.clone()),
+            cache,
             metadata_builder: Arc::new(base_metadata_builder),
             origin_gas_payment_enforcer: Arc::new(GasPaymentEnforcer::new([], db.clone())),
             transaction_gas_limit: Default::default(),
@@ -584,10 +605,11 @@ mod test {
         origin_domain: &HyperlaneDomain,
         destination_domain: &HyperlaneDomain,
         db: &HyperlaneRocksDB,
+        cache: MeteredCache<LocalCache>,
         num_operations: usize,
     ) -> Vec<QueueOperation> {
         let (message_processor, mut receive_channel) =
-            dummy_message_processor(origin_domain, destination_domain, db);
+            dummy_message_processor(origin_domain, destination_domain, db, cache);
 
         let processor = Processor::new(Box::new(message_processor), TaskMonitor::new());
         let process_fut = processor.spawn();
@@ -771,6 +793,13 @@ mod test {
             let origin_domain = dummy_domain(0, "dummy_origin_domain");
             let destination_domain = dummy_domain(1, "dummy_destination_domain");
             let db = HyperlaneRocksDB::new(&origin_domain, db);
+            let cache = MeteredCache::new(
+                LocalCache::new("test-cache"),
+                dummy_cache_metrics(),
+                MeteredCacheConfig {
+                    cache_name: "test-cache".to_owned(),
+                },
+            );
 
             // Assume the message syncer stored some new messages in HyperlaneDB
             let msg_retries = vec![0, 0, 0];
@@ -781,6 +810,7 @@ mod test {
                 &origin_domain,
                 &destination_domain,
                 &db,
+                cache.clone(),
                 msg_retries.len(),
             )
             .await;
@@ -797,6 +827,7 @@ mod test {
                 &origin_domain,
                 &destination_domain,
                 &db,
+                cache.clone(),
                 msg_retries.len(),
             )
             .await;

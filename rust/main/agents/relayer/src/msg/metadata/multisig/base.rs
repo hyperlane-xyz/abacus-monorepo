@@ -9,7 +9,7 @@ use eyre::{Context, Result};
 use hyperlane_base::settings::CheckpointSyncerBuildError;
 use hyperlane_base::MultisigCheckpointSyncer;
 use hyperlane_core::accumulator::merkle::Proof;
-use hyperlane_core::{HyperlaneMessage, MultisigSignedCheckpoint, H256};
+use hyperlane_core::{HyperlaneMessage, MultisigIsm, MultisigSignedCheckpoint, H256};
 use strum::Display;
 use tracing::{debug, info};
 
@@ -90,6 +90,42 @@ pub trait MultisigIsmMetadataBuilder: AsRef<MessageMetadataBuilder> + Send + Syn
         let metas: Result<Vec<Vec<u8>>> = self.token_layout().iter().map(build_token).collect();
         Ok(metas?.into_iter().flatten().collect())
     }
+
+    /// Returns the validators and threshold for the given multisig ISM.
+    /// This method will attempt to get the value from cache first. If it is a cache miss,
+    /// it will request it from ISM contract. The result will be cached for future use.
+    ///
+    /// Implicit contract in this method: function name `validators_and_threshold` matches
+    /// the name of the method `validators_and_threshold`.
+    async fn call_validators_and_threshold(
+        &self,
+        multisig_ism: &dyn MultisigIsm,
+        message: &HyperlaneMessage,
+        context: &'static str,
+    ) -> Result<(Vec<H256>, u8)> {
+        let contract_address = Some(multisig_ism.address());
+        let ism_domain = multisig_ism.domain().id();
+        let fn_key = format!("validators_and_threshold_{}", ism_domain);
+
+        match self
+            .as_ref()
+            .get_cached_call_result::<(Vec<H256>, u8)>(contract_address, &fn_key, message)
+            .await
+        {
+            Some(result) => Ok(result),
+            None => {
+                let result = multisig_ism
+                    .validators_and_threshold(message)
+                    .await
+                    .context(context)?;
+
+                self.as_ref()
+                    .cache_call_result(contract_address, &fn_key, message, &result)
+                    .await;
+                Ok(result)
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -102,10 +138,9 @@ impl<T: MultisigIsmMetadataBuilder> MetadataBuilder for T {
             .await
             .context(CTX)?;
 
-        let (validators, threshold) = multisig_ism
-            .validators_and_threshold(message)
-            .await
-            .context(CTX)?;
+        let (validators, threshold) = self
+            .call_validators_and_threshold(&multisig_ism, message, CTX)
+            .await?;
 
         if validators.is_empty() {
             info!("Could not fetch metadata: No validator set found for ISM");

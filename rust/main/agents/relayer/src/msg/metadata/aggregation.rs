@@ -7,7 +7,9 @@ use eyre::Context;
 use itertools::{Either, Itertools};
 use tracing::{info, instrument};
 
-use hyperlane_core::{HyperlaneMessage, InterchainSecurityModule, ModuleType, H256, U256};
+use hyperlane_core::{
+    AggregationIsm, HyperlaneMessage, InterchainSecurityModule, ModuleType, H256, U256,
+};
 
 use super::{MessageMetadataBuilder, Metadata, MetadataBuilder};
 
@@ -113,6 +115,39 @@ impl AggregationIsmMetadataBuilder {
         }
         Some(Self::n_cheapest_metas(metas_and_gas, threshold))
     }
+
+    /// Returns modules and threshold from the aggregation ISM.
+    /// This method will attempt to get the value from cache first. If it is a cache miss,
+    /// it will request it from the ISM contract. The result will be cached for future use.
+    ///
+    /// Implicit contract in this method: function name `modules_and_threshold` matches
+    /// the name of the method `modules_and_threshold`.
+    async fn call_modules_and_threshold(
+        &self,
+        ism: &dyn AggregationIsm,
+        message: &HyperlaneMessage,
+    ) -> eyre::Result<(Vec<H256>, u8)> {
+        let contract_address = Some(ism.address());
+        let ism_domain = ism.domain().id();
+        let fn_key = format!("modules_and_threshold_{}", ism_domain);
+
+        match self
+            .get_cached_call_result::<(Vec<H256>, u8)>(contract_address, &fn_key, message)
+            .await
+        {
+            Some(result) => Ok(result),
+            None => {
+                let result = ism
+                    .modules_and_threshold(message)
+                    .await
+                    .context("When fetching AggregationIsm metadata")?;
+
+                self.cache_call_result(contract_address, &fn_key, message, &result)
+                    .await;
+                Ok(result)
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -122,7 +157,8 @@ impl MetadataBuilder for AggregationIsmMetadataBuilder {
     async fn build(&self, ism_address: H256, message: &HyperlaneMessage) -> eyre::Result<Metadata> {
         const CTX: &str = "When fetching AggregationIsm metadata";
         let ism = self.build_aggregation_ism(ism_address).await.context(CTX)?;
-        let (ism_addresses, threshold) = ism.modules_and_threshold(message).await.context(CTX)?;
+
+        let (ism_addresses, threshold) = self.call_modules_and_threshold(&ism, message).await?;
         let threshold = threshold as usize;
 
         let sub_modules_and_metas = join_all(
